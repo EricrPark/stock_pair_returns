@@ -56,10 +56,32 @@ def calculate_portfolio_volatility(pairs, start_date):
     portfolio_returns = combined_returns_df.mean(axis=1)
 
     portfolio_volatility = portfolio_returns.std() * np.sqrt(252) * 100
-    return portfolio_volatility
+    return portfolio_volatility, portfolio_returns
+
+def calculate_max_drawdown(returns):
+    cumulative_returns = (1 + returns).cumprod()
+    peak = cumulative_returns.cummax()
+    drawdown = (cumulative_returns - peak) / peak
+    max_drawdown = drawdown.min() * 100
+    return max_drawdown
+
+def calculate_sharpe_ratio(returns, risk_free_rate):
+    mean_return = returns.mean() * 252
+    volatility = returns.std() * np.sqrt(252)
+    sharpe_ratio = (mean_return - risk_free_rate) / volatility
+    return sharpe_ratio
+
+def get_risk_free_rate(start_date):
+    treasury_data = yf.Ticker("^TNX").history(start=start_date)
+    treasury_data = treasury_data.resample('D').ffill().dropna()
+    average_yield = treasury_data['Close'].mean() / 100
+    return average_yield
 
 def main():
     st.title("Stock Pair Returns")
+
+    if 'risk_free_rate' not in st.session_state:
+        st.session_state.risk_free_rate = 0
 
     with st.form("pair_form"):
         num_pairs = st.number_input("Number of Pairs", min_value=1, value=1, step=1)
@@ -80,8 +102,12 @@ def main():
         start_date = start_date.strftime("%Y-%m-%d")
         adjusted_start_date = datetime.strptime(start_date, "%Y-%m-%d")
 
+        risk_free_rate = get_risk_free_rate(adjusted_start_date)
+        st.session_state.risk_free_rate = risk_free_rate
+
         results = []
         total_returns = {"One Month": 0, "Three Months": 0, "One Year": 0, "CAGR": 0}
+        all_combined_returns = []
 
         for long_ticker, short_ticker in pairs:
             long_results = get_stock_changes(long_ticker, adjusted_start_date)
@@ -96,7 +122,11 @@ def main():
                 period: f"{difference[period]:.2f}%" for period in difference
             }
 
-            pair_volatility = calculate_portfolio_volatility([(long_ticker, short_ticker)], adjusted_start_date)
+            pair_volatility, pair_returns = calculate_portfolio_volatility([(long_ticker, short_ticker)], adjusted_start_date)
+            pair_max_drawdown = calculate_max_drawdown(pair_returns)
+            pair_sharpe_ratio = calculate_sharpe_ratio(pair_returns, risk_free_rate)
+
+            all_combined_returns.append(pair_returns)
 
             results.append({
                 "Long Ticker": long_ticker,
@@ -105,7 +135,9 @@ def main():
                 "Difference (Three Months)": formatted_difference["Three Months"],
                 "Difference (One Year)": formatted_difference["One Year"],
                 "Difference (CAGR)": formatted_difference["CAGR"],
-                "Pair Volatility": f"{pair_volatility:.2f}%"
+                "Pair Volatility": f"{pair_volatility:.2f}%",
+                "Max Drawdown": f"{pair_max_drawdown:.2f}%",
+                "Sharpe Ratio": f"{pair_sharpe_ratio:.2f}"
             })
 
             # Aggregate total returns
@@ -113,8 +145,10 @@ def main():
             for period in total_returns:
                 total_returns[period] += difference[period] / num_pairs
 
-        # Calculate total portfolio volatility
-        total_volatility = calculate_portfolio_volatility(pairs, adjusted_start_date)
+        # Calculate total portfolio volatility and returns
+        total_volatility, total_portfolio_returns = calculate_portfolio_volatility(pairs, adjusted_start_date)
+        total_max_drawdown = calculate_max_drawdown(total_portfolio_returns)
+        total_sharpe_ratio = calculate_sharpe_ratio(total_portfolio_returns, risk_free_rate)
 
         # Convert results to DataFrame
         results_df = pd.DataFrame(results)
@@ -122,6 +156,8 @@ def main():
         # Calculate total portfolio returns
         total_returns_formatted = {period: f"{total_returns[period]:.2f}%" for period in total_returns}
         total_volatility_formatted = f"{total_volatility:.2f}%"
+        total_max_drawdown_formatted = f"{total_max_drawdown:.2f}%"
+        total_sharpe_ratio_formatted = f"{total_sharpe_ratio:.2f}"
 
         # Append total portfolio results
         total_row = pd.Series({
@@ -131,7 +167,9 @@ def main():
             "Difference (Three Months)": total_returns_formatted["Three Months"],
             "Difference (One Year)": total_returns_formatted["One Year"],
             "Difference (CAGR)": total_returns_formatted["CAGR"],
-            "Pair Volatility": total_volatility_formatted
+            "Pair Volatility": total_volatility_formatted,
+            "Max Drawdown": total_max_drawdown_formatted,
+            "Sharpe Ratio": total_sharpe_ratio_formatted
         })
 
         results_df = pd.concat([results_df, total_row.to_frame().T], ignore_index=True)
@@ -145,6 +183,10 @@ def main():
 
         st.success("Results saved to stock_returns.html")
         st.write(results_df)
+
+        # Advanced details to show calculated risk-free rate
+        with st.expander("Advanced Details"):
+            st.write(f"Calculated Risk-Free Rate: {st.session_state.risk_free_rate * 100:.2f}%")
 
 if __name__ == "__main__":
     main()
