@@ -4,16 +4,22 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
+
 def get_stock_data(ticker, start_date, end_date):
     stock = yf.Ticker(ticker)
     data = stock.history(start=start_date, end=end_date)
     data.index = pd.to_datetime(data.index).tz_localize(None)
     return data
 
+
 def adjust_to_next_trading_day(data, date):
+    max_date = data.index.max()
     while date.strftime("%Y-%m-%d") not in data.index:
         date += timedelta(days=1)
+        if date > max_date:
+            return max_date
     return date
+
 
 def get_stock_changes(ticker, start_date):
     today = datetime.now()
@@ -28,7 +34,14 @@ def get_stock_changes(ticker, start_date):
 
     one_month_change = calculate_change(start_date, start_date + timedelta(days=30))
     three_month_change = calculate_change(start_date, start_date + timedelta(days=90))
-    one_year_change = calculate_change(start_date, start_date + timedelta(days=365))
+
+    max_end_date = data.index.max()
+    end_date_one_year = start_date + timedelta(days=365)
+    if end_date_one_year > max_end_date:
+        one_year_change = calculate_change(start_date, max_end_date)
+    else:
+        one_year_change = calculate_change(start_date, end_date_one_year)
+
     cagr = ((1 + one_year_change / 100) ** (1 / 1) - 1) * 100
 
     return {
@@ -37,6 +50,7 @@ def get_stock_changes(ticker, start_date):
         "One Year": one_year_change,
         "CAGR": cagr
     }
+
 
 def calculate_portfolio_volatility(pairs, start_date):
     today = datetime.now()
@@ -58,6 +72,7 @@ def calculate_portfolio_volatility(pairs, start_date):
     portfolio_volatility = portfolio_returns.std() * np.sqrt(252) * 100
     return portfolio_volatility, portfolio_returns
 
+
 def calculate_max_drawdown(returns):
     cumulative_returns = (1 + returns).cumprod()
     peak = cumulative_returns.cummax()
@@ -65,17 +80,20 @@ def calculate_max_drawdown(returns):
     max_drawdown = drawdown.min() * 100
     return max_drawdown
 
+
 def calculate_sharpe_ratio(returns, risk_free_rate):
     mean_return = returns.mean() * 252
     volatility = returns.std() * np.sqrt(252)
     sharpe_ratio = (mean_return - risk_free_rate) / volatility
     return sharpe_ratio
 
+
 def get_risk_free_rate(start_date):
     treasury_data = yf.Ticker("^TNX").history(start=start_date)
     treasury_data = treasury_data.resample('D').ffill().dropna()
     average_yield = treasury_data['Close'].mean() / 100
     return average_yield
+
 
 def main():
     st.title("Stock Pair Returns")
@@ -122,7 +140,8 @@ def main():
                 period: f"{difference[period]:.2f}%" for period in difference
             }
 
-            pair_volatility, pair_returns = calculate_portfolio_volatility([(long_ticker, short_ticker)], adjusted_start_date)
+            pair_volatility, pair_returns = calculate_portfolio_volatility([(long_ticker, short_ticker)],
+                                                                           adjusted_start_date)
             pair_max_drawdown = calculate_max_drawdown(pair_returns)
             pair_sharpe_ratio = calculate_sharpe_ratio(pair_returns, risk_free_rate)
 
@@ -187,6 +206,7 @@ def main():
         # Advanced details to show calculated risk-free rate
         with st.expander("Advanced Details"):
             st.write(f"Calculated Risk-Free Rate: {st.session_state.risk_free_rate * 100:.2f}%")
+
 
 if __name__ == "__main__":
     main()
